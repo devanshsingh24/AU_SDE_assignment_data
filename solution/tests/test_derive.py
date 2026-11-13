@@ -286,3 +286,15 @@ def test_ingest_order_does_not_change_the_result(pii, tmp_path):
         results.append(derive(conn, CATALOGUE))
         conn.close()
     assert results[0] == results[1]
+
+
+def test_leads_sharing_a_reference_have_a_stable_order(conn, pii, tmp_path):
+    # Two different customers (phones) uploaded with the same policy number.
+    # Ingested batch_002 first, but batch_001 must still sort first.
+    ingest_lead_file(conn, pii, MOTOR, leads_csv(tmp_path / "batch_002.csv", "A One,9876543210,REF1,,,en"))
+    ingest_lead_file(conn, pii, MOTOR, leads_csv(tmp_path / "batch_001.csv", "B Two,9123456789,REF1,,,en"))
+    leads = derive(conn, CATALOGUE).leads
+    assert [(lead.external_ref, lead.batch_id) for lead in leads] == [
+        ("REF1", "batch_001"),
+        ("REF1", "batch_002"),
+    ]

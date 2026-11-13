@@ -268,6 +268,7 @@ def derive(conn: sqlite3.Connection, catalogue: Catalogue) -> Derivation:
     """Run every rule over the current ledger and leads."""
     lead_rows = conn.execute(
         "SELECT lead_id, workflow_id, phone_hash, external_ref, batch_id, phone_last4 FROM leads"
+        " ORDER BY lead_id"
     ).fetchall()
     leads = [
         Lead(r["lead_id"], r["workflow_id"], r["external_ref"], r["batch_id"], r["phone_last4"])
@@ -278,6 +279,7 @@ def derive(conn: sqlite3.Connection, catalogue: Catalogue) -> Derivation:
 
     events = [_to_event(r) for r in conn.execute(
         "SELECT event_id, event_type, workflow_id, call_id, occurred_at, phone_hash, payload FROM events"
+        " ORDER BY event_id"
     )]
     links, orphans = link_events(events, lead_ids)
     linked = [(e, links[e.event_id]) for e in events if e.event_id in links]
@@ -288,7 +290,8 @@ def derive(conn: sqlite3.Connection, catalogue: Catalogue) -> Derivation:
         calls_by_lead[c.lead_id].append(c)
     summaries = sorted(
         (summarize_lead(lead, calls_by_lead[lead.lead_id], catalogue) for lead in leads),
-        key=lambda s: (s.workflow_id, s.external_ref),
+        # The spec sorts by (workflow_id, external_ref); batch and phone make ties stable.
+        key=lambda s: (s.workflow_id, s.external_ref, s.batch_id, s.phone_last4),
     )
     return Derivation(
         leads=summaries,
