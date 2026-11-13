@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install -e solution
+
+      - name: Lint and format check
+        run: |
+          ruff check solution
+          ruff format --check solution
+
+      # The end-to-end tests generate data and run the real CLI, so this also
+      # proves the pipeline runs from a clean checkout on Linux.
+      - name: Tests
+        working-directory: solution
+        run: pytest -q
+
+      - name: Pipeline smoke run (no .env, keys are created automatically)
+        run: |
+          python assignment-a-data/tools/generate_data.py --seed 42 --scale small --out data
+          ledger ingest data/drop_1
+          ledger ingest data/drop_2
+          ledger report --out reports/
+          cat reports/data_quality.json
