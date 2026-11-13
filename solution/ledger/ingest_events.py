@@ -14,6 +14,7 @@ final counts correct and independent of ingest order.
 The raw line is never stored, because it contains the plaintext phone: only
 its keyed hash is kept.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,7 +22,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ledger.db import already_ingested, transaction
@@ -94,7 +95,7 @@ def ingest_event_file(
     with transaction(conn):
         file_id = conn.execute(
             "INSERT INTO ingested_files (sha256, path, kind, ingested_at) VALUES (?, ?, 'events', ?)",
-            (sha256, str(path), datetime.now(timezone.utc).isoformat()),
+            (sha256, str(path), datetime.now(UTC).isoformat()),
         ).lastrowid
 
         rows = []
@@ -112,16 +113,18 @@ def ingest_event_file(
                     result.duplicates += 1  # first copy wins, whichever drop it came in
                     continue
                 new_ids.add(event_id)
-                rows.append((
-                    event_id,
-                    file_id,
-                    event.get("event_type"),
-                    event.get("workflow_id"),
-                    event.get("call_id"),
-                    _utc_timestamp(event.get("occurred_at")),
-                    _phone_hash(pii, event.get("phone")),
-                    json.dumps(event.get("payload") or {}),
-                ))
+                rows.append(
+                    (
+                        event_id,
+                        file_id,
+                        event.get("event_type"),
+                        event.get("workflow_id"),
+                        event.get("call_id"),
+                        _utc_timestamp(event.get("occurred_at")),
+                        _phone_hash(pii, event.get("phone")),
+                        json.dumps(event.get("payload") or {}),
+                    )
+                )
 
         conn.executemany(
             "INSERT INTO events (event_id, file_id, event_type, workflow_id, call_id,"
@@ -149,7 +152,7 @@ def _utc_timestamp(value) -> str | None:
     parsed = parse_timestamp(value)
     if parsed is None:
         return None
-    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return parsed.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _phone_hash(pii: Pii, value) -> str | None:

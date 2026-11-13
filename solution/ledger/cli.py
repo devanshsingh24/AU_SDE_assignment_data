@@ -1,4 +1,5 @@
 """Command line: ``ledger ingest <drop>...``, ``ledger report --out <dir>``, ``ledger keygen``."""
+
 from __future__ import annotations
 
 import argparse
@@ -71,14 +72,20 @@ def _ingest(conn, drops: list[Path]) -> int:
 
 
 def _print_lead_file(r: FileResult) -> None:
-    status = "skipped (already ingested)" if r.skipped else (
-        f"created={r.created} merged={r.merged} rejected={r.rejected}")
+    status = (
+        "skipped (already ingested)"
+        if r.skipped
+        else (f"created={r.created} merged={r.merged} rejected={r.rejected}")
+    )
     print(f"{r.path}: {status}", flush=True)
 
 
 def _print_event_file(r: EventFileResult) -> None:
-    status = "skipped (already ingested)" if r.skipped else (
-        f"lines={r.lines} stored={r.stored} malformed={r.malformed} duplicates={r.duplicates}")
+    status = (
+        "skipped (already ingested)"
+        if r.skipped
+        else (f"lines={r.lines} stored={r.stored} malformed={r.malformed} duplicates={r.duplicates}")
+    )
     print(f"{r.path}: {status}", flush=True)
 
 

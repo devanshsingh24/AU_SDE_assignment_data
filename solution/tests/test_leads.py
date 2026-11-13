@@ -1,4 +1,5 @@
 """Tests for ledger.ingest_leads."""
+
 import json
 import re
 
@@ -33,10 +34,13 @@ def write_csv(path, *lines):
 
 
 def lead_rows(conn):
-    return [dict(r) for r in conn.execute(
-        "SELECT batch_id, row_number, outcome, reason, field_warnings FROM lead_rows"
-        " ORDER BY file_id, row_number"
-    )]
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT batch_id, row_number, outcome, reason, field_warnings FROM lead_rows"
+            " ORDER BY file_id, row_number"
+        )
+    ]
 
 
 def only_lead(conn, pii):
@@ -50,6 +54,7 @@ def only_lead(conn, pii):
 
 
 # ---------- validate_row ----------
+
 
 def test_valid_row_is_normalised():
     result = validate_row(MOTOR, row())
@@ -112,6 +117,7 @@ def test_rejected_row_has_no_warnings():
 
 # ---------- ingest_lead_file ----------
 
+
 def test_blank_rows_are_skipped_and_not_numbered(conn, pii, tmp_path):
     path = write_csv(
         tmp_path / "batch_001.csv",
@@ -125,7 +131,13 @@ def test_blank_rows_are_skipped_and_not_numbered(conn, pii, tmp_path):
     assert (result.created, result.rejected) == (1, 1)
     assert lead_rows(conn) == [
         {"batch_id": "batch_001", "row_number": 1, "outcome": "created", "reason": None, "field_warnings": 0},
-        {"batch_id": "batch_001", "row_number": 2, "outcome": "rejected", "reason": "invalid_phone", "field_warnings": 0},
+        {
+            "batch_id": "batch_001",
+            "row_number": 2,
+            "outcome": "rejected",
+            "reason": "invalid_phone",
+            "field_warnings": 0,
+        },
     ]
 
 
@@ -207,8 +219,12 @@ def test_short_row_counts_missing_cells_as_empty(conn, pii, tmp_path):
 
 
 def test_no_pii_is_stored_in_plaintext(conn, pii, tmp_path):
-    write_csv(tmp_path / "leads" / "motor_renewal" / "batch_001.csv",
-              HEADER, "Ananya Iyer,9876543210,REF1,,,en", "Rohan Rao,N/A,REF2,,,en")
+    write_csv(
+        tmp_path / "leads" / "motor_renewal" / "batch_001.csv",
+        HEADER,
+        "Ananya Iyer,9876543210,REF1,,,en",
+        "Rohan Rao,N/A,REF2,,,en",
+    )
     ingest_leads(conn, pii, SCHEMAS, tmp_path)
 
     stored = " ".join(
@@ -260,6 +276,7 @@ def test_existing_lead_merged_twice_in_a_later_file(conn, pii, tmp_path):
 
 # ---------- file-level errors ----------
 
+
 def counts(conn):
     return tuple(
         conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -276,8 +293,11 @@ def test_non_utf8_csv_is_refused_and_nothing_is_kept(conn, pii, tmp_path):
 
 
 def test_changed_file_with_the_same_name_is_refused(conn, pii, tmp_path):
-    path = write_csv(tmp_path / "drop_1" / "leads" / "motor_renewal" / "batch_001.csv",
-                     HEADER, "A One,9876543210,REF1,,,en")
+    path = write_csv(
+        tmp_path / "drop_1" / "leads" / "motor_renewal" / "batch_001.csv",
+        HEADER,
+        "A One,9876543210,REF1,,,en",
+    )
     ingest_lead_file(conn, pii, MOTOR, path)
     before = counts(conn)
 

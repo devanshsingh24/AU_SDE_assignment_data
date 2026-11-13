@@ -1,6 +1,7 @@
 """Tests for ledger.derive: the spec's derived-fact rules."""
+
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -32,8 +33,9 @@ T0 = datetime(2026, 10, 5, 10, 0, tzinfo=IST)
 
 
 def ev(event_id, event_type, *, call_id="c1", minutes=0, code=None, phone_hash="h1", workflow_id=MR):
-    return Event(event_id, event_type, workflow_id, call_id,
-                 T0 + timedelta(minutes=minutes), phone_hash, code)
+    return Event(
+        event_id, event_type, workflow_id, call_id, T0 + timedelta(minutes=minutes), phone_hash, code
+    )
 
 
 def call(call_id="c1", *, lead_id=1, minutes=0, connected=False, failed=False, disposition=None):
@@ -45,22 +47,34 @@ SET, OVERRIDE = EventType.DISPOSITION_SET, EventType.DISPOSITION_OVERRIDE
 
 # ---------- effective_disposition ----------
 
+
 @pytest.mark.parametrize(
     "events, expected",
     [
         pytest.param([], None, id="none"),
-        pytest.param([ev("e1", SET, code="callback_requested", minutes=1),
-                      ev("e2", SET, code="not_interested", minutes=2)],
-                     "not_interested", id="latest-set"),
-        pytest.param([ev("e1", OVERRIDE, code="renewed", minutes=1),
-                      ev("e2", SET, code="not_interested", minutes=9)],
-                     "renewed", id="override-beats-later-set"),
-        pytest.param([ev("e1", OVERRIDE, code="renewed", minutes=5),
-                      ev("e2", OVERRIDE, code="dnd", minutes=3)],
-                     "renewed", id="latest-override"),
-        pytest.param([ev("e1", OVERRIDE, code="renewed"),
-                      ev("e2", OVERRIDE, code="dnd")],
-                     "dnd", id="tie-broken-by-event-id"),
+        pytest.param(
+            [
+                ev("e1", SET, code="callback_requested", minutes=1),
+                ev("e2", SET, code="not_interested", minutes=2),
+            ],
+            "not_interested",
+            id="latest-set",
+        ),
+        pytest.param(
+            [ev("e1", OVERRIDE, code="renewed", minutes=1), ev("e2", SET, code="not_interested", minutes=9)],
+            "renewed",
+            id="override-beats-later-set",
+        ),
+        pytest.param(
+            [ev("e1", OVERRIDE, code="renewed", minutes=5), ev("e2", OVERRIDE, code="dnd", minutes=3)],
+            "renewed",
+            id="latest-override",
+        ),
+        pytest.param(
+            [ev("e1", OVERRIDE, code="renewed"), ev("e2", OVERRIDE, code="dnd")],
+            "dnd",
+            id="tie-broken-by-event-id",
+        ),
         pytest.param([ev("e1", OVERRIDE, code="renewed")], "renewed", id="override-only"),
     ],
 )
@@ -70,19 +84,25 @@ def test_effective_disposition(events, expected):
 
 # ---------- bucket_for ----------
 
+
 @pytest.mark.parametrize(
     "calls, expected",
     [
         pytest.param([], Bucket.YET_TO_REACH_OUT, id="no-calls"),
         pytest.param([call(disposition="renewed")], Bucket.COMPLETED, id="terminal-success"),
         pytest.param([call(disposition="not_interested")], Bucket.COMPLETED, id="terminal-not-success"),
-        pytest.param([call("c1", failed=True), call("c2", disposition="dnd")],
-                     Bucket.COMPLETED, id="completed-beats-failed"),
-        pytest.param([call("c1", failed=True), call("c2", failed=True)],
-                     Bucket.TELEPHONY_FAILED, id="all-failed"),
+        pytest.param(
+            [call("c1", failed=True), call("c2", disposition="dnd")],
+            Bucket.COMPLETED,
+            id="completed-beats-failed",
+        ),
+        pytest.param(
+            [call("c1", failed=True), call("c2", failed=True)], Bucket.TELEPHONY_FAILED, id="all-failed"
+        ),
         pytest.param([call("c1", failed=True), call("c2")], Bucket.DIALED, id="some-failed"),
-        pytest.param([call(connected=True, disposition="callback_requested")],
-                     Bucket.DIALED, id="non-terminal"),
+        pytest.param(
+            [call(connected=True, disposition="callback_requested")], Bucket.DIALED, id="non-terminal"
+        ),
     ],
 )
 def test_bucket_for(calls, expected):
@@ -120,6 +140,7 @@ def test_override_links_through_call_id():
 
 
 # ---------- build_calls ----------
+
 
 def lead_of(events):
     return [(e, 1) for e in events]
@@ -183,14 +204,18 @@ def test_lead_summary():
 def test_lead_without_calls():
     s = summarize_lead(LEAD, [], CATALOGUE)
     assert (s.bucket, s.last_call_at, s.current_disposition, s.ever_success) == (
-        Bucket.YET_TO_REACH_OUT, "", "", False,
+        Bucket.YET_TO_REACH_OUT,
+        "",
+        "",
+        False,
     )
 
 
 # ---------- daily_overview ----------
 
+
 def test_daily_overview_uses_ist_dates_and_distinct_success_leads():
-    late_utc = datetime(2026, 10, 5, 20, 0, tzinfo=timezone.utc)  # 01:30 IST on 6 Oct
+    late_utc = datetime(2026, 10, 5, 20, 0, tzinfo=UTC)  # 01:30 IST on 6 Oct
     calls = [
         call("c1", lead_id=1, connected=True, disposition="renewed"),
         call("c2", lead_id=1, minutes=30, connected=True, disposition="renewed"),
@@ -222,8 +247,14 @@ def leads_csv(path, *rows):
 
 
 def e(event_id, event_type, call_id, occurred_at, payload=None, phone="+91 98765 43210"):
-    out = {"event_id": event_id, "event_type": event_type, "workflow_id": MR,
-           "call_id": call_id, "occurred_at": occurred_at, "payload": payload or {}}
+    out = {
+        "event_id": event_id,
+        "event_type": event_type,
+        "workflow_id": MR,
+        "call_id": call_id,
+        "occurred_at": occurred_at,
+        "payload": payload or {},
+    }
     if phone is not None:
         out["phone"] = phone
     return out
@@ -232,12 +263,24 @@ def e(event_id, event_type, call_id, occurred_at, payload=None, phone="+91 98765
 EVENTS = [
     e("evt_1", "call.initiated", "call_1", "2026-10-05T04:30:00Z"),
     e("evt_2", "call.connected", "call_1", "2026-10-05T04:30:10Z"),
-    e("evt_3", "disposition.set", "call_1", "2026-10-05 10:05:00", {"disposition_code": "callback_requested"}),
+    e(
+        "evt_3",
+        "disposition.set",
+        "call_1",
+        "2026-10-05 10:05:00",
+        {"disposition_code": "callback_requested"},
+    ),
     e("evt_4", "call.initiated", "call_2", "2026-10-06T11:00:00+05:30", phone="09876543210"),
     e("evt_5", "call.connected", "call_2", "2026-10-06T05:30:20Z"),
     e("evt_6", "disposition.set", "call_2", "2026-10-06T05:35:00Z", {"disposition_code": "not_interested"}),
-    e("evt_7", "disposition.override", "call_2", "2026-10-07T09:00:00Z",
-      {"disposition_code": "renewed", "overridden_by": "supervisor_1", "reason": "qa_review"}, phone=None),
+    e(
+        "evt_7",
+        "disposition.override",
+        "call_2",
+        "2026-10-07T09:00:00Z",
+        {"disposition_code": "renewed", "overridden_by": "supervisor_1", "reason": "qa_review"},
+        phone=None,
+    ),
     e("evt_8", "call.initiated", "call_9", "2026-10-05T05:00:00Z", phone="9000000000"),  # never uploaded
 ]
 
@@ -264,7 +307,9 @@ def test_event_before_its_lead_is_linked_once_the_lead_arrives(conn, pii, tmp_pa
     ingest_event_file(conn, pii, jsonl(tmp_path / "drop_1" / "events_0001.jsonl", *EVENTS))
     assert derive(conn, CATALOGUE).orphan_events == len(EVENTS)
 
-    ingest_lead_file(conn, pii, MOTOR, leads_csv(tmp_path / "drop_2" / "batch_003.csv", "A One,9876543210,REF1,,,en"))
+    ingest_lead_file(
+        conn, pii, MOTOR, leads_csv(tmp_path / "drop_2" / "batch_003.csv", "A One,9876543210,REF1,,,en")
+    )
     after = derive(conn, CATALOGUE)
     assert after.orphan_events == 1
     assert after.leads[0].total_calls == 2

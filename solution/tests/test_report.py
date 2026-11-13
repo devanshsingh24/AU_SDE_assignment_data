@@ -1,4 +1,5 @@
 """Tests for ledger.report formatting and data_quality on a small database."""
+
 import json
 
 import pytest
@@ -39,18 +40,51 @@ def reports(conn, pii, tmp_path):
     )
     events = tmp_path / "events_0001.jsonl"
     lines = [
-        {"event_id": "e1", "event_type": "call.initiated", "workflow_id": "motor_renewal",
-         "call_id": "c1", "occurred_at": "2026-10-05T04:30:00Z", "phone": "9876543210", "payload": {}},
-        {"event_id": "e2", "event_type": "call.connected", "workflow_id": "motor_renewal",
-         "call_id": "c1", "occurred_at": "2026-10-05T04:30:09Z", "phone": "9876543210", "payload": {}},
-        {"event_id": "e3", "event_type": "disposition.set", "workflow_id": "motor_renewal",
-         "call_id": "c1", "occurred_at": "2026-10-05T04:35:00Z", "phone": "9876543210",
-         "payload": {"disposition_code": "renewed"}},
-        {"event_id": "e4", "event_type": "disposition.set", "workflow_id": "motor_renewal",
-         "call_id": "c1", "occurred_at": "2026-10-05T04:36:00Z", "phone": "9876543210",
-         "payload": {"disposition_code": "RENEWD"}},
-        {"event_id": "e5", "event_type": "call.initiated", "workflow_id": "motor_renewal",
-         "call_id": "c9", "occurred_at": "2026-10-05T05:00:00Z", "phone": "9000000000", "payload": {}},
+        {
+            "event_id": "e1",
+            "event_type": "call.initiated",
+            "workflow_id": "motor_renewal",
+            "call_id": "c1",
+            "occurred_at": "2026-10-05T04:30:00Z",
+            "phone": "9876543210",
+            "payload": {},
+        },
+        {
+            "event_id": "e2",
+            "event_type": "call.connected",
+            "workflow_id": "motor_renewal",
+            "call_id": "c1",
+            "occurred_at": "2026-10-05T04:30:09Z",
+            "phone": "9876543210",
+            "payload": {},
+        },
+        {
+            "event_id": "e3",
+            "event_type": "disposition.set",
+            "workflow_id": "motor_renewal",
+            "call_id": "c1",
+            "occurred_at": "2026-10-05T04:35:00Z",
+            "phone": "9876543210",
+            "payload": {"disposition_code": "renewed"},
+        },
+        {
+            "event_id": "e4",
+            "event_type": "disposition.set",
+            "workflow_id": "motor_renewal",
+            "call_id": "c1",
+            "occurred_at": "2026-10-05T04:36:00Z",
+            "phone": "9876543210",
+            "payload": {"disposition_code": "RENEWD"},
+        },
+        {
+            "event_id": "e5",
+            "event_type": "call.initiated",
+            "workflow_id": "motor_renewal",
+            "call_id": "c9",
+            "occurred_at": "2026-10-05T05:00:00Z",
+            "phone": "9000000000",
+            "payload": {},
+        },
     ]
     events.write_text(
         "\n".join([*(json.dumps(x) for x in lines), json.dumps(lines[0]), '{"event_id": "e6", "event'])
@@ -116,16 +150,26 @@ def test_data_quality(reports):
 def test_data_quality_key_order(reports):
     keys = list(json.loads(read(reports / "data_quality.json")))
     assert keys == [
-        "lead_rows_total", "lead_rows_rejected", "rejections_by_reason", "duplicate_lead_rows_merged",
-        "field_warnings", "events_total", "malformed_events", "duplicate_events_dropped",
-        "orphan_events", "unknown_disposition_events",
+        "lead_rows_total",
+        "lead_rows_rejected",
+        "rejections_by_reason",
+        "duplicate_lead_rows_merged",
+        "field_warnings",
+        "events_total",
+        "malformed_events",
+        "duplicate_events_dropped",
+        "orphan_events",
+        "unknown_disposition_events",
     ]
 
 
 def test_empty_database_still_writes_all_files(conn, tmp_path):
     write_reports(conn, CATALOGUE, tmp_path / "out")
     assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [
-        "batch_summary.csv", "daily_overview.csv", "data_quality.json",
-        "lead_report.csv", "rejections.csv",
+        "batch_summary.csv",
+        "daily_overview.csv",
+        "data_quality.json",
+        "lead_report.csv",
+        "rejections.csv",
     ]
     assert json.loads(read(tmp_path / "out" / "data_quality.json"))["events_total"] == 0

@@ -1,4 +1,5 @@
 """Tests for ledger.db: schema constraints that protect correctness."""
+
 import sqlite3
 
 import pytest

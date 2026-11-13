@@ -1,4 +1,5 @@
 """Tests for ledger.schema, using the real schema files."""
+
 import pytest
 
 from ledger.config import SCHEMAS_DIR

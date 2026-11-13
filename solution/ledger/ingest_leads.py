@@ -14,6 +14,7 @@ For each ``<drop>/leads/<workflow_id>/*.csv`` (workflow, then filename order):
 The whole file runs in one transaction, so it is either fully ingested or not
 at all.
 """
+
 from __future__ import annotations
 
 import csv
@@ -22,7 +23,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ledger.db import IngestError, already_ingested, transaction
@@ -122,9 +123,7 @@ def ingest_leads(
     return results
 
 
-def ingest_lead_file(
-    conn: sqlite3.Connection, pii: Pii, schema: WorkflowSchema, path: Path
-) -> FileResult:
+def ingest_lead_file(conn: sqlite3.Connection, pii: Pii, schema: WorkflowSchema, path: Path) -> FileResult:
     """Ingest one CSV. Rows are merged in memory, then written with executemany."""
     result = FileResult(path=str(path))
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -137,12 +136,14 @@ def ingest_lead_file(
         file_id = conn.execute(
             "INSERT INTO ingested_files (sha256, path, kind, workflow_id, ingested_at)"
             " VALUES (?, ?, 'leads', ?, ?)",
-            (sha256, str(path), schema.workflow_id, datetime.now(timezone.utc).isoformat()),
+            (sha256, str(path), schema.workflow_id, datetime.now(UTC).isoformat()),
         ).lastrowid
 
-        existing_ids = dict(conn.execute(
-            "SELECT phone_hash, lead_id FROM leads WHERE workflow_id = ?", (schema.workflow_id,)
-        ).fetchall())
+        existing_ids = dict(
+            conn.execute(
+                "SELECT phone_hash, lead_id FROM leads WHERE workflow_id = ?", (schema.workflow_id,)
+            ).fetchall()
+        )
         touched: dict[str, _Lead] = {}  # phone_hash → lead state, in first-seen order
         lead_rows = []
 
@@ -182,17 +183,30 @@ def ingest_lead_file(
             "INSERT INTO leads (workflow_id, phone_hash, phone_last4, pii_enc, external_ref,"
             " batch_id, attributes) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (schema.workflow_id, lead.phone_hash, lead.phone_last4, pii.encrypt(json.dumps(lead.pii)),
-                 lead.external_ref, lead.batch_id, json.dumps(lead.attributes))
-                for lead in touched.values() if lead.lead_id is None
+                (
+                    schema.workflow_id,
+                    lead.phone_hash,
+                    lead.phone_last4,
+                    pii.encrypt(json.dumps(lead.pii)),
+                    lead.external_ref,
+                    lead.batch_id,
+                    json.dumps(lead.attributes),
+                )
+                for lead in touched.values()
+                if lead.lead_id is None
             ],
         )
         conn.executemany(
             "UPDATE leads SET pii_enc = ?, external_ref = ?, attributes = ? WHERE lead_id = ?",
             [
-                (pii.encrypt(json.dumps(lead.pii)), lead.external_ref, json.dumps(lead.attributes),
-                 lead.lead_id)
-                for lead in touched.values() if lead.lead_id is not None
+                (
+                    pii.encrypt(json.dumps(lead.pii)),
+                    lead.external_ref,
+                    json.dumps(lead.attributes),
+                    lead.lead_id,
+                )
+                for lead in touched.values()
+                if lead.lead_id is not None
             ],
         )
         conn.executemany(

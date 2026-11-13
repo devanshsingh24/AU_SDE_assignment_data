@@ -1,4 +1,5 @@
 """Workflow lead schemas and the disposition catalogue (``assignment-a-data/schemas/``)."""
+
 from __future__ import annotations
 
 import csv
@@ -42,9 +43,7 @@ class WorkflowSchema:
     @property
     def attribute_fields(self) -> tuple[Field, ...]:
         """Everything that is not the phone, PII, or the reference."""
-        return tuple(
-            f for f in self.fields if not f.pii and not f.reference and f.type != "phone"
-        )
+        return tuple(f for f in self.fields if not f.pii and not f.reference and f.type != "phone")
 
     def map_headers(self, headers: list[str]) -> dict[int, str]:
         """Map column index → field name. Spec: Lead files › Header matching.

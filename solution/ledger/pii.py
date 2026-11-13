@@ -15,6 +15,7 @@ still have to be matched to leads by phone. So each phone is stored three ways:
 
 The hashing and encryption keys are separate so either can be rotated alone.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -44,9 +45,7 @@ class Pii:
         hmac_key = os.environ.get(HMAC_KEY_ENV, "").strip()
         fernet_key = os.environ.get(FERNET_KEY_ENV, "").strip()
         missing = [
-            name
-            for name, value in ((HMAC_KEY_ENV, hmac_key), (FERNET_KEY_ENV, fernet_key))
-            if not value
+            name for name, value in ((HMAC_KEY_ENV, hmac_key), (FERNET_KEY_ENV, fernet_key)) if not value
         ]
         if missing:
             raise RuntimeError(
@@ -133,9 +132,9 @@ def check_or_record_keys(conn: sqlite3.Connection, pii: Pii) -> None:
     the stored ones) and make earlier PII unreadable. The first ingest records a
     check value for each key in ``meta``; later ingests must reproduce them.
     """
-    stored = dict(conn.execute(
-        "SELECT key, value FROM meta WHERE key IN ('hmac_check', 'fernet_check')"
-    ).fetchall())
+    stored = dict(
+        conn.execute("SELECT key, value FROM meta WHERE key IN ('hmac_check', 'fernet_check')").fetchall()
+    )
     if not stored:
         conn.executemany(
             "INSERT INTO meta (key, value) VALUES (?, ?)",

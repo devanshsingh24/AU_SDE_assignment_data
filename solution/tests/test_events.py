@@ -1,4 +1,5 @@
 """Tests for ledger.ingest_events."""
+
 import json
 import re
 import sqlite3
@@ -33,12 +34,16 @@ def stored(conn):
 
 
 def file_counters(conn):
-    return [tuple(r) for r in conn.execute(
-        "SELECT lines_total, malformed, duplicates FROM ingested_files ORDER BY file_id"
-    )]
+    return [
+        tuple(r)
+        for r in conn.execute(
+            "SELECT lines_total, malformed, duplicates FROM ingested_files ORDER BY file_id"
+        )
+    ]
 
 
 # ---------- parse_event_line ----------
+
 
 def test_parse_valid_line():
     assert parse_event_line(event().encode())["event_id"] == "evt_1"
@@ -65,6 +70,7 @@ def test_numeric_event_id_is_kept_as_string():
 
 
 # ---------- counting ----------
+
 
 def test_counts_malformed_duplicates_and_ignores_blank_lines(conn, pii, tmp_path):
     path = write_jsonl(
@@ -111,6 +117,7 @@ def test_reingesting_a_file_changes_nothing(conn, pii, tmp_path):
 
 # ---------- what gets stored ----------
 
+
 @pytest.mark.parametrize(
     "occurred_at",
     [
@@ -147,14 +154,20 @@ def test_invalid_phone_is_stored_with_null_hash(conn, pii, tmp_path):
 
 
 def test_override_without_phone_keeps_call_id(conn, pii, tmp_path):
-    override = json.dumps({
-        "event_id": "evt_9",
-        "event_type": "disposition.override",
-        "workflow_id": "motor_renewal",
-        "call_id": "call_7",
-        "occurred_at": "2026-10-06T10:00:00Z",
-        "payload": {"disposition_code": "renewed", "overridden_by": "supervisor_1", "reason": "qa_review"},
-    })
+    override = json.dumps(
+        {
+            "event_id": "evt_9",
+            "event_type": "disposition.override",
+            "workflow_id": "motor_renewal",
+            "call_id": "call_7",
+            "occurred_at": "2026-10-06T10:00:00Z",
+            "payload": {
+                "disposition_code": "renewed",
+                "overridden_by": "supervisor_1",
+                "reason": "qa_review",
+            },
+        }
+    )
     ingest_event_file(conn, pii, write_jsonl(tmp_path / "e.jsonl", override))
     row = stored(conn)["evt_9"]
     assert row["phone_hash"] is None

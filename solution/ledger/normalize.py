@@ -6,6 +6,7 @@ value is invalid. Deciding whether a value is *missing* (empty after trimming)
 is the caller's job, because missing and invalid lead to different outcomes
 (``missing_required`` vs ``invalid_phone`` / field warning).
 """
+
 from __future__ import annotations
 
 import re

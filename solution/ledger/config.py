@@ -1,4 +1,5 @@
 """Paths and environment settings shared by the pipeline."""
+
 from __future__ import annotations
 
 import os

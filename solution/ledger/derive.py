@@ -10,13 +10,14 @@ same reports as ingesting everything at once.
 The pure functions take plain dataclasses, so each spec rule can be tested
 without a database. ``derive()`` at the bottom loads the data and runs them.
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from ledger.normalize import to_ist
@@ -42,7 +43,7 @@ class Bucket(StrEnum):
     DIALED = "in_progress_dialed"
 
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 # Not frozen: frozen dataclasses build every object through object.__setattr__,
@@ -116,9 +117,8 @@ class Derivation:
 
 # ---------- pure rules ----------
 
-def link_events(
-    events: list[Event], lead_ids: dict[tuple[str, str], int]
-) -> tuple[dict[str, int], int]:
+
+def link_events(events: list[Event], lead_ids: dict[tuple[str, str], int]) -> tuple[dict[str, int], int]:
     """Map event_id → lead_id. Returns the links and the number of orphans.
 
     Events link via (workflow_id, phone_hash). Overrides have no phone, so they
@@ -156,9 +156,7 @@ def effective_disposition(disposition_events: list[Event]) -> str | None:
     Expects only events whose code is in the catalogue.
     """
     overrides = [e for e in disposition_events if e.event_type == EventType.DISPOSITION_OVERRIDE]
-    candidates = overrides or [
-        e for e in disposition_events if e.event_type == EventType.DISPOSITION_SET
-    ]
+    candidates = overrides or [e for e in disposition_events if e.event_type == EventType.DISPOSITION_SET]
     return max(candidates, key=Event.sort_key).code if candidates else None
 
 
@@ -200,9 +198,7 @@ def build_calls(
                 initiated_at=first.occurred_at,
                 connected=EventType.CONNECTED in types,
                 telephony_failed=EventType.TELEPHONY_FAILED in types,
-                disposition=effective_disposition(
-                    [e for e, _ in items if e.event_type in DISPOSITION_TYPES]
-                ),
+                disposition=effective_disposition([e for e, _ in items if e.event_type in DISPOSITION_TYPES]),
             )
         )
     return calls, unknown
@@ -264,6 +260,7 @@ def daily_overview(calls: list[Call], catalogue: Catalogue) -> list[DailyRow]:
 
 # ---------- loading from the database ----------
 
+
 def derive(conn: sqlite3.Connection, catalogue: Catalogue) -> Derivation:
     """Run every rule over the current ledger and leads."""
     lead_rows = conn.execute(
@@ -277,10 +274,13 @@ def derive(conn: sqlite3.Connection, catalogue: Catalogue) -> Derivation:
     lead_ids = {(r["workflow_id"], r["phone_hash"]): r["lead_id"] for r in lead_rows}
     lead_workflow = {lead.lead_id: lead.workflow_id for lead in leads}
 
-    events = [_to_event(r) for r in conn.execute(
-        "SELECT event_id, event_type, workflow_id, call_id, occurred_at, phone_hash, payload FROM events"
-        " ORDER BY event_id"
-    )]
+    events = [
+        _to_event(r)
+        for r in conn.execute(
+            "SELECT event_id, event_type, workflow_id, call_id, occurred_at, phone_hash, payload FROM events"
+            " ORDER BY event_id"
+        )
+    ]
     links, orphans = link_events(events, lead_ids)
     linked = [(e, links[e.event_id]) for e in events if e.event_id in links]
     calls, unknown = build_calls(linked, lead_workflow, catalogue)

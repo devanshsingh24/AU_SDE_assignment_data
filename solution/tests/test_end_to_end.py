@@ -2,6 +2,7 @@
 
 Uses a seed other than 42 on purpose: the grader runs on an unseen seed.
 """
+
 import csv
 import json
 import re
@@ -19,7 +20,13 @@ from ledger.pii import FERNET_KEY_ENV, HMAC_KEY_ENV
 
 REAL_LOAD_ENV = config.load_env
 GENERATOR = REPO_ROOT / "assignment-a-data" / "tools" / "generate_data.py"
-REPORT_FILES = ["batch_summary.csv", "daily_overview.csv", "lead_report.csv", "rejections.csv", "data_quality.json"]
+REPORT_FILES = [
+    "batch_summary.csv",
+    "daily_overview.csv",
+    "lead_report.csv",
+    "rejections.csv",
+    "data_quality.json",
+]
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +34,8 @@ def data(tmp_path_factory):
     out = tmp_path_factory.mktemp("data")
     subprocess.run(
         [sys.executable, str(GENERATOR), "--seed", "7", "--scale", "small", "--out", str(out)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     return out
 

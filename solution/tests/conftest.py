@@ -1,4 +1,5 @@
 """Shared fixtures: a fresh database per test and a PII helper with test keys."""
+
 import pytest
 from cryptography.fernet import Fernet
 

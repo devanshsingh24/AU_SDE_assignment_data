@@ -4,6 +4,7 @@ Reports are rebuilt from scratch on every run, from the database only (see
 ``derive.py``). They never need the PII keys: masking uses the stored last
 four digits, so ``report`` can run without decrypting anything.
 """
+
 from __future__ import annotations
 
 import csv
@@ -17,15 +18,33 @@ from ledger.pii import mask_phone
 from ledger.schema import Catalogue
 
 BATCH_SUMMARY_HEADER = [
-    "workflow_id", "batch_id", "total_leads",
-    Bucket.YET_TO_REACH_OUT, Bucket.TELEPHONY_FAILED, Bucket.DIALED, Bucket.COMPLETED,
+    "workflow_id",
+    "batch_id",
+    "total_leads",
+    Bucket.YET_TO_REACH_OUT,
+    Bucket.TELEPHONY_FAILED,
+    Bucket.DIALED,
+    Bucket.COMPLETED,
 ]
 DAILY_OVERVIEW_HEADER = [
-    "workflow_id", "date", "total_calls", "connected_calls", "connectivity_rate", "success_leads",
+    "workflow_id",
+    "date",
+    "total_calls",
+    "connected_calls",
+    "connectivity_rate",
+    "success_leads",
 ]
 LEAD_REPORT_HEADER = [
-    "workflow_id", "external_ref", "batch_id", "phone_masked", "bucket", "total_calls",
-    "connected_calls", "last_call_at", "current_disposition", "ever_success",
+    "workflow_id",
+    "external_ref",
+    "batch_id",
+    "phone_masked",
+    "bucket",
+    "total_calls",
+    "connected_calls",
+    "last_call_at",
+    "current_disposition",
+    "ever_success",
 ]
 REJECTIONS_HEADER = ["workflow_id", "batch_id", "row_number", "reason"]
 
@@ -51,25 +70,47 @@ def batch_summary_rows(conn: sqlite3.Connection, d: Derivation) -> list[list]:
     for lead in d.leads:
         counts.setdefault((lead.workflow_id, lead.batch_id), Counter())[lead.bucket] += 1
     return [
-        [workflow_id, batch_id, sum(c.values()),
-         c[Bucket.YET_TO_REACH_OUT], c[Bucket.TELEPHONY_FAILED], c[Bucket.DIALED], c[Bucket.COMPLETED]]
+        [
+            workflow_id,
+            batch_id,
+            sum(c.values()),
+            c[Bucket.YET_TO_REACH_OUT],
+            c[Bucket.TELEPHONY_FAILED],
+            c[Bucket.DIALED],
+            c[Bucket.COMPLETED],
+        ]
         for (workflow_id, batch_id), c in sorted(counts.items())
     ]
 
 
 def daily_overview_rows(d: Derivation) -> list[list]:
     return [
-        [r.workflow_id, r.date, r.total_calls, r.connected_calls,
-         format_rate(r.connected_calls, r.total_calls), r.success_leads]
+        [
+            r.workflow_id,
+            r.date,
+            r.total_calls,
+            r.connected_calls,
+            format_rate(r.connected_calls, r.total_calls),
+            r.success_leads,
+        ]
         for r in d.daily
     ]
 
 
 def lead_report_rows(d: Derivation) -> list[list]:
     return [
-        [s.workflow_id, s.external_ref, s.batch_id, mask_phone(s.phone_last4), s.bucket,
-         s.total_calls, s.connected_calls, s.last_call_at, s.current_disposition,
-         format_bool(s.ever_success)]
+        [
+            s.workflow_id,
+            s.external_ref,
+            s.batch_id,
+            mask_phone(s.phone_last4),
+            s.bucket,
+            s.total_calls,
+            s.connected_calls,
+            s.last_call_at,
+            s.current_disposition,
+            format_bool(s.ever_success),
+        ]
         for s in d.leads
     ]
 
@@ -94,10 +135,12 @@ def data_quality(conn: sqlite3.Connection, d: Derivation) -> dict:
         " COALESCE(SUM(CASE WHEN outcome != 'rejected' THEN field_warnings END), 0) AS warnings"
         " FROM lead_rows"
     ).fetchone()
-    by_reason = dict(conn.execute(
-        "SELECT reason, COUNT(*) FROM lead_rows WHERE outcome = 'rejected'"
-        " GROUP BY reason ORDER BY reason"
-    ).fetchall())
+    by_reason = dict(
+        conn.execute(
+            "SELECT reason, COUNT(*) FROM lead_rows WHERE outcome = 'rejected'"
+            " GROUP BY reason ORDER BY reason"
+        ).fetchall()
+    )
     lines = conn.execute(
         "SELECT COALESCE(SUM(lines_total), 0), COALESCE(SUM(malformed), 0),"
         " COALESCE(SUM(duplicates), 0) FROM ingested_files WHERE kind = 'events'"

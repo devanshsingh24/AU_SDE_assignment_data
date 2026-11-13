@@ -13,6 +13,7 @@ Design notes (see SUBMISSION.md for the full rationale):
   time, so an orphan from drop_1 is linked automatically once drop_2 brings
   its lead.
 """
+
 from __future__ import annotations
 
 import sqlite3

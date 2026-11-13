@@ -1,4 +1,5 @@
 """Tests for ledger.pii."""
+
 import pytest
 from cryptography.fernet import Fernet
 
@@ -61,6 +62,7 @@ def test_from_env_fails_loudly_when_a_key_is_missing(monkeypatch, missing):
 
 
 # ---------- ensure_keys / check_or_record_keys ----------
+
 
 @pytest.fixture
 def no_keys(monkeypatch):

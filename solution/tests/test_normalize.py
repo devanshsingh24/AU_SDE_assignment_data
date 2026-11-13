@@ -1,5 +1,6 @@
 """Tests for ledger.normalize. Cases come from the spec and from generate_data.py."""
-from datetime import date, datetime, timezone
+
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -20,6 +21,7 @@ LANGS = ["en", "hi", "ta", "kn", "te", "mr"]
 
 # ---------- headers ----------
 
+
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -37,6 +39,7 @@ def test_normalize_header(raw, expected):
 
 
 # ---------- phones ----------
+
 
 @pytest.mark.parametrize(
     "raw",
@@ -78,6 +81,7 @@ def test_normalize_phone_invalid(raw):
 
 # ---------- dates ----------
 
+
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -114,6 +118,7 @@ def test_parse_date_invalid(raw):
 
 
 # ---------- decimals ----------
+
 
 @pytest.mark.parametrize(
     "raw, expected",
@@ -154,6 +159,7 @@ def test_parse_decimal_invalid(raw):
 
 # ---------- enums ----------
 
+
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -172,6 +178,7 @@ def test_parse_enum_invalid(raw):
 
 
 # ---------- timestamps ----------
+
 
 @pytest.mark.parametrize(
     "raw",
@@ -194,7 +201,7 @@ def test_utc_timestamp_crossing_midnight_lands_on_next_ist_date():
 
 
 def test_to_ist_formats_with_offset():
-    moment = datetime(2026, 10, 14, 12, 25, 24, tzinfo=timezone.utc)
+    moment = datetime(2026, 10, 14, 12, 25, 24, tzinfo=UTC)
     assert to_ist(moment).isoformat() == "2026-10-14T17:55:24+05:30"
 
 
