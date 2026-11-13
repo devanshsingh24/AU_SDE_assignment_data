@@ -7,25 +7,34 @@
 
 ## How to run
 ```bash
-# setup (repo root)
+# setup (repo root, Python 3.11+)
 python -m venv .venv
-.venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e solution                # installs the `ledger` command
-copy solution\.env.example solution\.env   # macOS/Linux: cp
-ledger keygen                          # paste the two printed lines into solution/.env
 
-# run
+# run (no key setup needed: the first ingest creates the PII keys in solution/.env)
 python assignment-a-data/tools/generate_data.py --seed 42 --scale small --out data
 ledger ingest data/drop_1
 ledger ingest data/drop_2
 ledger report --out reports/
 
-# test
-cd solution
-pytest
+# test, lint
+cd solution && pytest
+ruff check . && ruff format --check .
 ```
-More detail is in [`solution/README.md`](solution/README.md).
+CI runs all of the above on Linux with Python 3.11 and 3.12 (`.github/workflows/tests.yml`). More detail is in [`solution/README.md`](solution/README.md).
+
+## Interpretations that could change the output
+The spec leaves these open. Each is one row in the decisions table below; these are the ones that can change a diffed number.
+- **`lead_rows_total`** counts every non-blank data row: created + merged + rejected.
+- **`field_warnings`** includes warnings on merged duplicate rows, but not on rejected rows.
+- **`rejections_by_reason`** lists only reasons that occurred. Zero counts are omitted, since the set of `missing_required:<field>` reasons is open-ended.
+- **`batch_summary.csv`** lists every uploaded batch, with zeros if none of its rows created a lead.
+- **Orphans:** a non-override event with an invalid phone is an orphan, even if its `call_id` belongs to a linked call. Only overrides link through `call_id`.
+- **Unknown codes:** an override with an unknown code is ignored, so the call falls back to the previous valid override or `disposition.set`.
+- **`connectivity_rate`** uses Python's `f"{x:.4f}"`, which rounds half to even on exact ties.
+- **Ties:** equal `occurred_at` is broken by `event_id`; equal call times by `call_id`; leads with equal `external_ref` by `batch_id`, then the masked phone.
 
 ## Design
 ```
@@ -165,6 +174,11 @@ Nothing else about a person is stored. Keys come from `LEDGER_HMAC_KEY` and `LED
 | No secondary indexes on `events` | Reports read the whole ledger in one scan, so the indexes were never used, and maintaining two random-key indexes was a large share of bulk-insert time | Index `(workflow_id, phone_hash)` and `call_id` |
 | Each file is buffered in memory and written with `executemany` (leads are merged in memory first) | Single-row `execute` calls dominated the profile; a file is at most a few thousand rows, so memory is not a concern | One `INSERT`/`SELECT` per row |
 | SQLite page cache raised to 64 MB | The 2 MB default thrashed on random-key indexes during large ingests | Default cache |
+| If neither PII key is set, `ingest` creates both in the git-ignored `solution/.env` and warns | A fresh clone (or an automated grader) runs with no manual step, and keys still never reach git. Exactly one key set is an error | Refuse to run until keys are configured |
+| The first ingest stores a check value for each key in a `meta` table; later ingests with other keys are refused | Different keys would silently break phone matching and make stored PII unreadable | No check |
+| A file whose logical name (`drop/leads/<wf>/<file>`, `drop/events/<file>`) was already ingested with different content is refused | Merging a corrected re-send on top of the original would count its rows twice; an operator must decide | Ingest it as a new file (the old behaviour), or replace the old one |
+| `ingest` stops at the first unreadable or refused file (exit 1); files before it stay ingested and a re-run skips them | Lead files must go in order, because the first valid row of a lead decides its `batch_id` | Skip the bad file and continue |
+| `lead_report.csv` ties on `external_ref` are broken by `batch_id`, then the masked phone | The spec sorts by `(workflow_id, external_ref)` only; two customers can share a reference | Leave ties in database order |
 
 ## Failure modes considered
 **Handled:**
@@ -174,18 +188,22 @@ Nothing else about a person is stored. Keys come from `LEDGER_HMAC_KEY` and `LED
 - **Ingest order:** drop by drop, re-ingest and "all at once" give byte-identical reports. This is tested end to end, and checked on seeds 1, 7, 99, 123 and 2026 plus 42.
 - **Dirty input:** six phone formats, bad dates and amounts, blank rows, ragged rows, renamed and extra columns, BOMs, truncated JSON, invalid UTF-8, duplicate events within and across drops, overrides without phones, unknown codes.
 - **Duplicate-detection bug:** the `event_id` primary key is a backstop. If the in-memory duplicate check were ever wrong, the file fails and rolls back instead of double-counting. Tested.
-- **Missing keys or a missing drop folder:** a clear error and a non-zero exit code. `report` doesn't need keys at all.
+- **No keys on a fresh clone:** created automatically in `solution/.env`, with a warning. Only one key set, or a missing drop folder, gives a clear error and a non-zero exit. `report` doesn't need keys at all.
+- **Keys that don't match the database** (lost or changed `.env`): refused with a clear error, instead of silently breaking matching. Tested.
+- **A re-sent file with the same name but changed content:** refused, and the database is unchanged. Tested.
+- **An unreadable lead file** (not UTF-8, broken CSV): a clear error naming the file instead of a traceback. Files before it stay ingested, nothing from it is kept, and a re-run continues from it. Tested.
 - **Accidental edits to the ledger:** triggers reject UPDATE and DELETE on `events`.
 
 **Not handled / known limits:**
-- **A file whose content changes after ingest** (same name, new bytes) is treated as a new file and ingested again. Lead rows would merge again and events would count as duplicates.
-- **Key rotation:** there's no `MultiFernet` or re-hash migration. Losing the keys makes the PII unrecoverable, and changing the HMAC key breaks matching against existing leads.
+- **Replacing a corrected file:** a changed re-send is refused, but there's no command to replace the original (it would mean un-merging lead rows). For now the fix is to rebuild the database from the raw drops.
+- **Key rotation:** there's no `MultiFernet` or re-hash migration. Lost keys make the stored PII unrecoverable; the database refuses other keys, so the only way forward is to rebuild from the raw drops.
+- **Renamed folders:** changed-file detection uses the last path parts (`drop_1/leads/…`), so a re-send under a different drop name isn't detected as a change.
 - **Concurrent `ingest` runs on the same database:** SQLite serialises writers, but nothing coordinates two processes ingesting the same drop.
 - **Memory:** `report` loads all events into memory (about 600k rows is fine). Tens of millions would need the aggregation moved into SQL.
 - **The same `call_id` appearing under two different leads' phones** is resolved deterministically, but not reported.
 
 ## Testing
-`cd solution && pytest`: 197 tests in about 8 s.
+`cd solution && pytest`: 209 tests in about 4 s, passing on Python 3.11.4 (SQLite 3.42) and 3.12 locally, and in CI on Linux. `ruff check` and `ruff format --check` are clean.
 - **Unit, table-driven:**
   - every normaliser (phone formats, impossible dates, currency prefixes, enums, the three timestamp forms)
   - header mapping
@@ -195,13 +213,15 @@ Nothing else about a person is stored. Keys come from `LEDGER_HMAC_KEY` and `LED
   - linking (overrides through `call_id`)
   - daily IST date boundaries
 - **Database:** constraints, append-only triggers, transaction rollback, and an IntegrityError backstop when the in-memory duplicate set is stale.
-- **Ingest:** blank-row numbering, merges within and across files, first `batch_id` kept, re-ingest is a no-op, no plaintext PII in any table.
+- **Ingest:** blank-row numbering, merges within and across files, first `batch_id` kept, re-ingest is a no-op, no plaintext PII in any table, non-UTF-8 and changed files refused with nothing kept.
 - **Reports:** exact file contents for a hand-built case, key order of `data_quality.json`, empty database.
 - **End to end through the CLI** (seed 7): byte-identical reports across drop by drop, re-ingest and all at once; internal consistency; sort orders; formats; no 10-digit numbers in any output.
+- **CLI key handling:** keys are created on the first run and reused on the next; a single key is refused; keys that don't match the database are refused. The CLI stops at a bad file and resumes after it's fixed.
 
 **Outside the test suite** (scripted, see Results):
 - the same identity and invariant checks on seeds 1, 7, 99, 123 and 2026
 - the large dataset compared byte for byte before and after the performance work
+- seeds 42 and 7 compared byte for byte before and after every change in the final improvement round (key handling, ordering, file errors, formatting)
 
 **Not tested:**
 - Postgres
@@ -248,7 +268,7 @@ Orphans fall from 1123 after drop_1 to 462 after drop_2 as late leads arrive. Tw
    - Fernet is now the largest Python cost. AES-GCM via `cryptography` is faster.
    - Move the report aggregation into SQL (window functions for the latest override) rather than building 600k Python objects.
 2. **Key rotation:** `MultiFernet` for encryption keys, plus a re-hash migration for the HMAC key.
-3. **Detect changed files:** warn when a file path was ingested before with different content, instead of treating it as new.
+3. **Replace a corrected file:** a `ledger replace <file>` that rebuilds the affected workflow's leads from the remaining files, instead of refusing the re-send.
 4. **Production at 100k leads/day:**
    - a scheduler running `ingest` per drop
    - Postgres with `COPY` into staging tables

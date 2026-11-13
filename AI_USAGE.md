@@ -16,6 +16,14 @@ For each step, Claude proposed a plan, I reviewed and approved it, and then it w
 - **Performance work in Step 7:** profiled the large dataset with cProfile and applied the fixes step by step. Each change was timed, and the reports were compared byte for byte against the slower version.
 - **Research:** used subagents to collect documentation, videos and a SQLite-vs-Postgres comparison, which I used to choose SQLite.
 - **Documents:** drafted `SUBMISSION.md` (decision table, failure modes, results) and this file, which I reviewed and edited.
+- **Review against the evaluation criteria:** after the first push, I asked Claude to score the project against the "How we evaluate" list and plan improvements. It found gaps such as the pipeline refusing to run without manually created keys, and changed files being silently ingested twice. It then made the fixes as separate commits:
+  - auto-created keys, plus a check that the keys match the database
+  - stable sort tie-breaks
+  - clear errors for bad or changed files
+  - ruff lint and format
+  - CI on Python 3.11 and 3.12
+
+  Reports for two seeds were compared byte for byte after every change.
 
 ## What I wrote or decided myself
 To be clear: Claude proposed most of the designs and wrote most of the code. My part was choosing between the options, directing the work, and approving each step before it went ahead.
@@ -28,17 +36,21 @@ To be clear: Claude proposed most of the designs and wrote most of the code. My 
 - **What I approved:**
   - Each step's plan before any code was written. That includes Claude's proposed database design (the four tables, HMAC plus Fernet for PII, keys in `.env`) and the decisions in the `SUBMISSION.md` table, such as computing orphans and buckets at report time.
   - When Claude raised a choice that was mine to make, I gave the answer: my details, which tools I used, and how to set up git.
+  - For the evaluation round: keeping it to high-impact changes only, creating missing keys automatically rather than refusing to run, and adding CI.
 
 ## Where the AI was wrong or unhelpful
 - **The first version was far too slow at scale.** The design Claude first wrote passed every test but took **418 s** on the large dataset. It used single-row inserts and two secondary indexes that no query used. Profiling showed the time was inside SQLite, and after the fixes it ran in 115 s with identical output.
 - **A wrong test.** In Step 7, Claude wrote a test meant to prove the database rejects a duplicate the in-memory check missed. It failed, because the two test files had identical bytes, so the second was skipped by its content hash before the insert ran. The failing test exposed the mistake, and the test was fixed rather than the code.
 - **Advice that contradicted the spec.** A research subagent suggested numbering CSV rows with `enumerate(reader, start=2)`, spreadsheet style, and parsing dates with `strptime`. Both would break the spec: row numbers must count only non-blank rows starting at 1, and `strptime` accepts single-digit days like `1/2/2026`. Claude flagged both when it passed the research on to me, and neither was used.
+- **A test that only passed on Claude's machine.** One end-to-end test relied on there being no `solution/.env`. Following the README in a fresh clone (which creates that file) made it fail. A clean-clone test caught this before submission.
+- **A gap found by its own test.** When the CLI stopped at a bad file, it didn't print which earlier files had already been committed, because results were only printed at the end. The new test for that scenario failed, and the fix added per-file progress output.
 - **Smaller slips:**
+  - a `if True:` wrapper added just to avoid re-indenting code; it was replaced before committing
   - a smoke-test script printed `sqlite3.Row` objects instead of values and had to be rerun
   - a convoluted PII assertion in the end-to-end test was replaced with a plain regex check
 
 ## How I verified AI-generated code
-- **Automated tests:** 197 pytest tests (`cd solution && pytest`), covering:
+- **Automated tests:** 209 pytest tests (`cd solution && pytest`), passing on Python 3.11 and 3.12, and in CI on Linux. They cover:
   - each spec rule with table-driven cases
   - the database constraints
   - end to end through the real CLI on a seed the code was never tuned on (seed 7)
