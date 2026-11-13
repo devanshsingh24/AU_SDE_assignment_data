@@ -1,0 +1,3 @@
+# Build artifacts from `pip install -e solution`
+*.egg-info/
+build/
