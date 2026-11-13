@@ -18,6 +18,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 SCHEMA_VERSION = 1
 
@@ -89,6 +90,35 @@ BEGIN
     SELECT RAISE(ABORT, 'events ledger is append-only');
 END;
 """
+
+
+class IngestError(Exception):
+    """A whole input file can't be ingested. Nothing from it is written."""
+
+
+# How many trailing path parts name a file: drop_1/leads/<workflow>/batch_001.csv
+# and drop_1/events/events_0001.jsonl. Stable even if the data folder moves.
+_LOGICAL_PARTS = {"leads": 4, "events": 3}
+
+
+def already_ingested(conn: sqlite3.Connection, path: Path, sha256: str, kind: str) -> bool:
+    """True if this exact content was ingested before, so the file is skipped.
+
+    Raises IngestError if a file with the same logical name was ingested with
+    *different* content: merging a corrected re-send on top of the original
+    would count its rows twice. An operator has to decide what to do.
+    """
+    if conn.execute("SELECT 1 FROM ingested_files WHERE sha256 = ?", (sha256,)).fetchone():
+        return True
+    parts = _LOGICAL_PARTS[kind]
+    name = Path(path).parts[-parts:]
+    for (stored,) in conn.execute("SELECT path FROM ingested_files WHERE kind = ?", (kind,)):
+        if Path(stored).parts[-parts:] == name:
+            raise IngestError(
+                f"{path}: a file named {'/'.join(name)} was already ingested with different "
+                "content; refusing to ingest it twice"
+            )
+    return False
 
 
 def connect(path: str) -> sqlite3.Connection:

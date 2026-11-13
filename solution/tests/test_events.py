@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from ledger.db import IngestError
 from ledger.ingest_events import ingest_event_file, ingest_events, parse_event_line
 
 
@@ -195,3 +196,12 @@ def test_primary_key_backstops_a_stale_known_set(conn, pii, tmp_path):
         ingest_event_file(conn, pii, stale, known=set())
     assert set(stored(conn)) == {"evt_1"}  # evt_2 rolled back with the file
     assert conn.execute("SELECT COUNT(*) FROM ingested_files").fetchone()[0] == 1
+
+
+def test_changed_events_file_with_the_same_name_is_refused(conn, pii, tmp_path):
+    path = write_jsonl(tmp_path / "drop_1" / "events" / "events_0001.jsonl", event("evt_1"))
+    ingest_event_file(conn, pii, path)
+    write_jsonl(path, event("evt_1"), event("evt_2"))
+    with pytest.raises(IngestError, match="different content"):
+        ingest_event_file(conn, pii, path)
+    assert set(stored(conn)) == {"evt_1"}

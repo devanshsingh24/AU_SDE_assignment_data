@@ -2,7 +2,8 @@
 
 For each ``<drop>/leads/<workflow_id>/*.csv`` (workflow, then filename order):
 
-1. Skip the file if its sha256 is already in ``ingested_files`` (idempotency).
+1. Skip the file if its sha256 is already in ``ingested_files`` (idempotency);
+   refuse a file of the same name whose content changed (see ``already_ingested``).
 2. Map headers to schema fields; ignore unknown columns.
 3. Skip blank rows; number the rest from 1.
 4. Validate fields in schema order; the first failure rejects the row.
@@ -19,11 +20,12 @@ import csv
 import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ledger.db import transaction
+from ledger.db import IngestError, already_ingested, transaction
 from ledger.normalize import normalize_phone, parse_date, parse_decimal, parse_enum
 from ledger.pii import Pii, last4
 from ledger.schema import Field, WorkflowSchema
@@ -93,9 +95,17 @@ def validate_row(schema: WorkflowSchema, raw: dict[str, str]) -> ValidatedRow:
 
 
 def ingest_leads(
-    conn: sqlite3.Connection, pii: Pii, schemas: dict[str, WorkflowSchema], drop_dir: Path
+    conn: sqlite3.Connection,
+    pii: Pii,
+    schemas: dict[str, WorkflowSchema],
+    drop_dir: Path,
+    on_file: Callable[[FileResult], None] | None = None,
 ) -> list[FileResult]:
-    """Ingest every lead CSV of one drop, in (workflow, filename) order."""
+    """Ingest every lead CSV of one drop, in (workflow, filename) order.
+
+    ``on_file`` is called as soon as each file is done, so progress is visible
+    even if a later file fails.
+    """
     results = []
     leads_dir = drop_dir / "leads"
     if not leads_dir.is_dir():
@@ -107,6 +117,8 @@ def ingest_leads(
             continue
         for path in sorted(workflow_dir.glob("*.csv")):
             results.append(ingest_lead_file(conn, pii, schema, path))
+            if on_file:
+                on_file(results[-1])
     return results
 
 
@@ -116,7 +128,7 @@ def ingest_lead_file(
     """Ingest one CSV. Rows are merged in memory, then written with executemany."""
     result = FileResult(path=str(path))
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-    if conn.execute("SELECT 1 FROM ingested_files WHERE sha256 = ?", (sha256,)).fetchone():
+    if already_ingested(conn, path, sha256, "leads"):
         result.skipped = True
         return result
 
@@ -134,37 +146,36 @@ def ingest_lead_file(
         touched: dict[str, _Lead] = {}  # phone_hash → lead state, in first-seen order
         lead_rows = []
 
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            reader = csv.reader(f)
-            headers = next(reader, [])
-            columns = schema.map_headers(headers)
-            row_number = 0
-            for cells in reader:
-                if all(not cell.strip() for cell in cells):
-                    continue  # blank rows are skipped and not counted
-                row_number += 1
-                raw = {name: cells[i] if i < len(cells) else "" for i, name in columns.items()}
-                row = validate_row(schema, raw)
+        reader = _csv_rows(path)
+        headers = next(reader, [])
+        columns = schema.map_headers(headers)
+        row_number = 0
+        for cells in reader:
+            if all(not cell.strip() for cell in cells):
+                continue  # blank rows are skipped and not counted
+            row_number += 1
+            raw = {name: cells[i] if i < len(cells) else "" for i, name in columns.items()}
+            row = validate_row(schema, raw)
 
-                if row.reason is not None:
-                    outcome = "rejected"
-                    result.rejected += 1
+            if row.reason is not None:
+                outcome = "rejected"
+                result.rejected += 1
+            else:
+                phone_hash = pii.phone_hash(row.values[schema.phone_field.name])
+                lead = touched.get(phone_hash)
+                if lead is None and phone_hash in existing_ids:
+                    lead = touched[phone_hash] = _Lead.load(conn, pii, existing_ids[phone_hash])
+                if lead is None:
+                    touched[phone_hash] = _Lead.new(schema, phone_hash, batch_id, row.values)
+                    outcome = "created"
+                    result.created += 1
                 else:
-                    phone_hash = pii.phone_hash(row.values[schema.phone_field.name])
-                    lead = touched.get(phone_hash)
-                    if lead is None and phone_hash in existing_ids:
-                        lead = touched[phone_hash] = _Lead.load(conn, pii, existing_ids[phone_hash])
-                    if lead is None:
-                        touched[phone_hash] = _Lead.new(schema, phone_hash, batch_id, row.values)
-                        outcome = "created"
-                        result.created += 1
-                    else:
-                        lead.merge(schema, row.values)
-                        outcome = "merged"
-                        result.merged += 1
-                lead_rows.append(
-                    (file_id, row_number, schema.workflow_id, batch_id, outcome, row.reason, row.warnings)
-                )
+                    lead.merge(schema, row.values)
+                    outcome = "merged"
+                    result.merged += 1
+            lead_rows.append(
+                (file_id, row_number, schema.workflow_id, batch_id, outcome, row.reason, row.warnings)
+            )
 
         # Each lead is encrypted once, after all of this file's merges.
         conn.executemany(
@@ -190,6 +201,18 @@ def ingest_lead_file(
             lead_rows,
         )
     return result
+
+
+def _csv_rows(path: Path):
+    """Yield CSV rows; an undecodable or broken file becomes an IngestError.
+
+    Raised inside the file's transaction, so nothing from the file is kept.
+    """
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            yield from csv.reader(f)
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise IngestError(f"{path}: not a readable UTF-8 CSV ({exc})") from exc
 
 
 @dataclass

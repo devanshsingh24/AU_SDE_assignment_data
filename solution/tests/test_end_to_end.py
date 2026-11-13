@@ -166,3 +166,22 @@ def test_cli_refuses_keys_that_do_not_match_the_database(monkeypatch, tmp_path, 
 def test_cli_rejects_missing_directory(tmp_path, capsys):
     assert main(["--db", str(tmp_path / "x.db"), "ingest", str(tmp_path / "nope")]) == 2
     assert "not a directory" in capsys.readouterr().err
+
+
+def test_cli_stops_at_a_bad_file_and_keeps_earlier_ones(tmp_path, capsys):
+    header = "customer_name,phone,policy_number,policy_expiry,premium_amount,preferred_language\n"
+    folder = tmp_path / "drop_1" / "leads" / "motor_renewal"
+    folder.mkdir(parents=True)
+    (folder / "batch_001.csv").write_text(header + "A One,9876543210,REF1,,,en\n", encoding="utf-8")
+    (folder / "batch_002.csv").write_bytes((header + "José,9123456789,REF2,,,en\n").encode("cp1252"))
+
+    db = str(tmp_path / "x.db")
+    assert main(["--db", db, "ingest", str(tmp_path / "drop_1")]) == 1
+    captured = capsys.readouterr()
+    assert "batch_001.csv: created=1" in captured.out
+    assert "batch_002.csv: not a readable UTF-8 CSV" in captured.err
+
+    # After the operator fixes the file, a re-run picks up where it stopped.
+    (folder / "batch_002.csv").write_text(header + "Jose,9123456789,REF2,,,en\n", encoding="utf-8")
+    assert main(["--db", db, "ingest", str(tmp_path / "drop_1")]) == 0
+    assert "batch_001.csv: skipped" in capsys.readouterr().out

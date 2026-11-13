@@ -5,6 +5,7 @@ import re
 import pytest
 
 from ledger.config import SCHEMAS_DIR
+from ledger.db import IngestError
 from ledger.ingest_leads import ingest_lead_file, ingest_leads, validate_row
 from ledger.schema import load_schemas
 
@@ -255,3 +256,39 @@ def test_existing_lead_merged_twice_in_a_later_file(conn, pii, tmp_path):
         "premium_amount": "200.00",
         "preferred_language": "mr",
     }
+
+
+# ---------- file-level errors ----------
+
+def counts(conn):
+    return tuple(
+        conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        for table in ("ingested_files", "lead_rows", "leads")
+    )
+
+
+def test_non_utf8_csv_is_refused_and_nothing_is_kept(conn, pii, tmp_path):
+    path = tmp_path / "batch_001.csv"
+    path.write_bytes((HEADER + "\nJosé Rao,9876543210,REF1,,,en\n").encode("cp1252"))
+    with pytest.raises(IngestError, match="not a readable UTF-8 CSV"):
+        ingest_lead_file(conn, pii, MOTOR, path)
+    assert counts(conn) == (0, 0, 0)
+
+
+def test_changed_file_with_the_same_name_is_refused(conn, pii, tmp_path):
+    path = write_csv(tmp_path / "drop_1" / "leads" / "motor_renewal" / "batch_001.csv",
+                     HEADER, "A One,9876543210,REF1,,,en")
+    ingest_lead_file(conn, pii, MOTOR, path)
+    before = counts(conn)
+
+    write_csv(path, HEADER, "A One,9876543210,REF1,,,en", "B Two,9123456789,REF2,,,en")
+    with pytest.raises(IngestError, match="different content"):
+        ingest_lead_file(conn, pii, MOTOR, path)
+    assert counts(conn) == before
+
+
+def test_same_content_in_a_moved_folder_is_skipped(conn, pii, tmp_path):
+    original = write_csv(tmp_path / "a" / "batch_001.csv", HEADER, "A One,9876543210,REF1,,,en")
+    moved = write_csv(tmp_path / "b" / "batch_001.csv", HEADER, "A One,9876543210,REF1,,,en")
+    ingest_lead_file(conn, pii, MOTOR, original)
+    assert ingest_lead_file(conn, pii, MOTOR, moved).skipped

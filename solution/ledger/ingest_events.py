@@ -19,11 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ledger.db import transaction
+from ledger.db import already_ingested, transaction
 from ledger.normalize import normalize_phone, parse_timestamp
 from ledger.pii import Pii
 
@@ -53,13 +54,23 @@ def parse_event_line(raw: bytes) -> dict | None:
     return event
 
 
-def ingest_events(conn: sqlite3.Connection, pii: Pii, drop_dir: Path) -> list[EventFileResult]:
-    """Ingest every events file of one drop, in filename order."""
+def ingest_events(
+    conn: sqlite3.Connection,
+    pii: Pii,
+    drop_dir: Path,
+    on_file: Callable[[EventFileResult], None] | None = None,
+) -> list[EventFileResult]:
+    """Ingest every events file of one drop, in filename order.
+
+    ``on_file`` is called as soon as each file is done.
+    """
     known = _known_event_ids(conn)  # loaded once per drop, not once per file
-    return [
-        ingest_event_file(conn, pii, path, known)
-        for path in sorted((drop_dir / "events").glob("*.jsonl"))
-    ]
+    results = []
+    for path in sorted((drop_dir / "events").glob("*.jsonl")):
+        results.append(ingest_event_file(conn, pii, path, known))
+        if on_file:
+            on_file(results[-1])
+    return results
 
 
 def ingest_event_file(
@@ -75,7 +86,7 @@ def ingest_event_file(
         known = _known_event_ids(conn)
     result = EventFileResult(path=str(path))
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-    if conn.execute("SELECT 1 FROM ingested_files WHERE sha256 = ?", (sha256,)).fetchone():
+    if already_ingested(conn, path, sha256, "events"):
         result.skipped = True
         return result
 

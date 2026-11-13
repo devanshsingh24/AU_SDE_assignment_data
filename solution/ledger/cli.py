@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 from ledger import config
-from ledger.db import connect, init_schema
-from ledger.ingest_events import ingest_events
-from ledger.ingest_leads import ingest_leads
+from ledger.db import IngestError, connect, init_schema
+from ledger.ingest_events import EventFileResult, ingest_events
+from ledger.ingest_leads import FileResult, ingest_leads
 from ledger.pii import Pii, check_or_record_keys, ensure_keys, generate_keys
 from ledger.report import write_reports
 from ledger.schema import load_dispositions, load_schemas
@@ -54,16 +54,32 @@ def _ingest(conn, drops: list[Path]) -> int:
 
     schemas = load_schemas(config.SCHEMAS_DIR)
     # Drops are processed in the order given: it decides which duplicate lead row comes first.
-    for drop in drops:
-        for r in ingest_leads(conn, pii, schemas, drop):
-            status = "skipped (already ingested)" if r.skipped else (
-                f"created={r.created} merged={r.merged} rejected={r.rejected}")
-            print(f"{r.path}: {status}")
-        for r in ingest_events(conn, pii, drop):
-            status = "skipped (already ingested)" if r.skipped else (
-                f"lines={r.lines} stored={r.stored} malformed={r.malformed} duplicates={r.duplicates}")
-            print(f"{r.path}: {status}")
+    try:
+        for drop in drops:
+            ingest_leads(conn, pii, schemas, drop, on_file=_print_lead_file)
+            ingest_events(conn, pii, drop, on_file=_print_event_file)
+    except IngestError as exc:
+        # Stop rather than skip: lead files must go in order, because the first
+        # valid row of a lead decides its batch_id.
+        print(f"error: {exc}", file=sys.stderr)
+        print(
+            "Files before it are ingested. Fix the file and re-run: ingested files are skipped.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
+
+
+def _print_lead_file(r: FileResult) -> None:
+    status = "skipped (already ingested)" if r.skipped else (
+        f"created={r.created} merged={r.merged} rejected={r.rejected}")
+    print(f"{r.path}: {status}", flush=True)
+
+
+def _print_event_file(r: EventFileResult) -> None:
+    status = "skipped (already ingested)" if r.skipped else (
+        f"lines={r.lines} stored={r.stored} malformed={r.malformed} duplicates={r.duplicates}")
+    print(f"{r.path}: {status}", flush=True)
 
 
 def _parser() -> argparse.ArgumentParser:
