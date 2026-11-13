@@ -12,6 +12,7 @@ from collections import Counter
 import pytest
 from cryptography.fernet import Fernet
 
+from ledger import config
 from ledger.cli import main
 from ledger.config import REPO_ROOT
 from ledger.pii import FERNET_KEY_ENV, HMAC_KEY_ENV
@@ -32,6 +33,9 @@ def data(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def keys(monkeypatch):
+    # Don't let a developer's solution/.env leak into these tests: the CLI
+    # loads it on start, which would silently refill a key a test removed.
+    monkeypatch.setattr(config, "load_env", lambda: None)
     monkeypatch.setenv(HMAC_KEY_ENV, "e2e-hmac-key")
     monkeypatch.setenv(FERNET_KEY_ENV, Fernet.generate_key().decode())
 
@@ -70,6 +74,7 @@ def reports(data, tmp_path_factory):
     tmp = tmp_path_factory.mktemp("run")
     db = str(tmp / "ledger.db")
     mp = pytest.MonkeyPatch()
+    mp.setattr(config, "load_env", lambda: None)
     mp.setenv(HMAC_KEY_ENV, "e2e-hmac-key")
     mp.setenv(FERNET_KEY_ENV, Fernet.generate_key().decode())
     main(["--db", db, "ingest", str(data / "drop_1"), str(data / "drop_2")])
