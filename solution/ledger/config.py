@@ -10,14 +10,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS_DIR = REPO_ROOT / "assignment-a-data" / "schemas"
 DISPOSITIONS_CSV = SCHEMAS_DIR / "dispositions.csv"
 DEFAULT_DB_PATH = "ledger.db"
+# Git-ignored (root .gitignore has `.env`). Holds the PII keys.
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 
 def load_env() -> None:
-    """Load a local ``.env`` file into ``os.environ`` (existing variables win).
+    """Load ``solution/.env`` into ``os.environ`` (existing variables win).
 
     Called by the CLI only, so tests stay independent of any developer's ``.env``.
     """
-    load_dotenv(override=False)
+    load_dotenv(ENV_FILE, override=False)
 
 
 def db_path() -> str:

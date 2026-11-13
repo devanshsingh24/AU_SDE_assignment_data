@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS ingested_files (
     duplicates  INTEGER
 );
 
+-- Small key/value store. Holds a check value for the PII keys, so a database
+-- can't be silently written with different keys than it was created with.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lead_rows (
     file_id        INTEGER NOT NULL REFERENCES ingested_files (file_id),
     row_number     INTEGER NOT NULL,

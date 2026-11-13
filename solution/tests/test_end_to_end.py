@@ -17,6 +17,7 @@ from ledger.cli import main
 from ledger.config import REPO_ROOT
 from ledger.pii import FERNET_KEY_ENV, HMAC_KEY_ENV
 
+REAL_LOAD_ENV = config.load_env
 GENERATOR = REPO_ROOT / "assignment-a-data" / "tools" / "generate_data.py"
 REPORT_FILES = ["batch_summary.csv", "daily_overview.csv", "lead_report.csv", "rejections.csv", "data_quality.json"]
 
@@ -32,10 +33,11 @@ def data(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def keys(monkeypatch):
-    # Don't let a developer's solution/.env leak into these tests: the CLI
-    # loads it on start, which would silently refill a key a test removed.
+def keys(monkeypatch, tmp_path):
+    # Don't let a developer's solution/.env leak into these tests (the CLI loads
+    # it on start), and never let a test write to it.
     monkeypatch.setattr(config, "load_env", lambda: None)
+    monkeypatch.setattr(config, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setenv(HMAC_KEY_ENV, "e2e-hmac-key")
     monkeypatch.setenv(FERNET_KEY_ENV, Fernet.generate_key().decode())
 
@@ -129,11 +131,36 @@ def test_no_full_phone_number_in_any_report(reports):
     assert not re.search(r"\d{10}", text)
 
 
-def test_cli_fails_cleanly_without_keys(monkeypatch, tmp_path, data, capsys):
+def test_cli_creates_keys_on_first_run_and_reuses_them(monkeypatch, tmp_path, data, capsys):
+    monkeypatch.setattr(config, "load_env", REAL_LOAD_ENV)  # read the (temporary) ENV_FILE for real
+    db = str(tmp_path / "x.db")
     monkeypatch.delenv(HMAC_KEY_ENV)
-    code = main(["--db", str(tmp_path / "x.db"), "ingest", str(data / "drop_1")])
-    assert code == 1
-    assert HMAC_KEY_ENV in capsys.readouterr().err
+    monkeypatch.delenv(FERNET_KEY_ENV)
+
+    assert main(["--db", db, "ingest", str(data / "drop_1")]) == 0
+    assert "new ones were created" in capsys.readouterr().err
+    assert HMAC_KEY_ENV in config.ENV_FILE.read_text(encoding="utf-8")
+
+    # A second run in a "new process" (no keys in the environment) reuses the file.
+    monkeypatch.delenv(HMAC_KEY_ENV)
+    monkeypatch.delenv(FERNET_KEY_ENV)
+    assert main(["--db", db, "ingest", str(data / "drop_2")]) == 0
+    assert "new ones were created" not in capsys.readouterr().err
+
+
+def test_cli_refuses_a_single_key(monkeypatch, tmp_path, data, capsys):
+    monkeypatch.delenv(HMAC_KEY_ENV)
+    assert main(["--db", str(tmp_path / "x.db"), "ingest", str(data / "drop_1")]) == 1
+    assert f"Only {FERNET_KEY_ENV} is set" in capsys.readouterr().err
+
+
+def test_cli_refuses_keys_that_do_not_match_the_database(monkeypatch, tmp_path, data, capsys):
+    db = str(tmp_path / "x.db")
+    assert main(["--db", db, "ingest", str(data / "drop_1")]) == 0
+    monkeypatch.setenv(HMAC_KEY_ENV, "a-different-key")
+    monkeypatch.setenv(FERNET_KEY_ENV, Fernet.generate_key().decode())
+    assert main(["--db", db, "ingest", str(data / "drop_2")]) == 1
+    assert "don't match" in capsys.readouterr().err
 
 
 def test_cli_rejects_missing_directory(tmp_path, capsys):

@@ -9,7 +9,7 @@ from ledger import config
 from ledger.db import connect, init_schema
 from ledger.ingest_events import ingest_events
 from ledger.ingest_leads import ingest_leads
-from ledger.pii import Pii, generate_keys
+from ledger.pii import Pii, check_or_record_keys, ensure_keys, generate_keys
 from ledger.report import write_reports
 from ledger.schema import load_dispositions, load_schemas
 
@@ -40,7 +40,14 @@ def _ingest(conn, drops: list[Path]) -> int:
         print(f"error: not a directory: {', '.join(map(str, missing))}", file=sys.stderr)
         return 2
     try:
+        if ensure_keys(config.ENV_FILE):
+            print(
+                f"warning: no PII keys were set, so new ones were created in {config.ENV_FILE}. "
+                "Keep that file: stored PII can't be read without it.",
+                file=sys.stderr,
+            )
         pii = Pii.from_env()
+        check_or_record_keys(conn, pii)
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
